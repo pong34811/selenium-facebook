@@ -30,9 +30,9 @@ class FacebookAutoGUI:
         url_frame = ttk.Frame(root, padding=10)
         url_frame.pack(fill=tk.X)
         ttk.Label(url_frame, text="Group URL:").pack(anchor=tk.W)
-        self.url_var = tk.StringVar(value="https://www.facebook.com/groups/831395294760364")
-        self.url_entry = ttk.Entry(url_frame, textvariable=self.url_var, width=50)
-        self.url_entry.pack(fill=tk.X, pady=5)
+        self.url_text = tk.Text(url_frame, height=5, width=50, font=("Segoe UI", 9))
+        self.url_text.insert("1.0", "https://www.facebook.com/groups/831395294760364\nhttps://www.facebook.com/groups/831395294760365")
+        self.url_text.pack(fill=tk.X, pady=5)
 
         # 2. Message to Post
         msg_frame = ttk.Frame(root, padding=10)
@@ -110,59 +110,85 @@ class FacebookAutoGUI:
     def _post_thread(self):
         try:
             self.btn_post.config(state=tk.DISABLED)
-            target_group = self.url_var.get()
+            # Parse URLs from the text area
+            raw_text = self.url_text.get("1.0", tk.END).strip()
+            # Split by newlines and clean up each line (remove quotes, commas, whitespace)
+            target_groups = []
+            for line in raw_text.split('\n'):
+                # Remove quotes and trailing commas if present
+                clean_line = line.strip().strip('"').strip("'").strip(',').strip()
+                if clean_line:
+                    target_groups.append(clean_line)
+
             message_content = self.msg_text.get("1.0", tk.END).strip()
 
-            if not target_group:
-                self.log("Error: Group URL is empty.")
+            if not target_groups:
+                self.log("Error: No Group URLs provided.")
                 return
 
-            self.log(f"Navigating to group: {target_group}")
-            self.driver.get(target_group)
+            self.log(f"Found {len(target_groups)} groups to post to.")
             
-            time.sleep(3) # Wait for load
+            success_count = 0
 
-            # Join group check could be added here, but let's stick to original logic
+            for i, target_group in enumerate(target_groups):
+                self.log(f"\n--- Processing Group {i+1}/{len(target_groups)} ---")
+                self.log(f"Target: {target_group}")
+                
+                try:
+                    self.driver.get(target_group)
+                    
+                    # Random sleep to look more human
+                    time.sleep(3) 
+
+                    # 1. Click "Write something..."
+                    self.log("Looking for post button...")
+                    try:
+                        # Try multiple selectors for better robustness
+                        # Note: Facebook structure changes often, these XPaths might need maintenance
+                        post_btn = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//span[contains(text(), 'เขียนอะไรสักหน่อย')]")))
+                        post_btn.click()
+                        self.log("Clicked 'Write something...'")
+                    except Exception as e:
+                        # Attempt fallback for different layouts?
+                        self.log(f"Could not find standard post button: {e}")
+                        raise e
+
+                    time.sleep(2)
+
+                    # 2. Type message
+                    self.log("Waiting for text box...")
+                    try:
+                        # Find the content editable div
+                        text_box = self.wait.until(EC.visibility_of_element_located((By.XPATH, "//div[@aria-placeholder='สร้างโพสต์สาธารณะ...']")))
+                        text_box.click()
+                        text_box.send_keys(message_content)
+                        self.log("Message typed.")
+                    except Exception as e:
+                        self.log(f"Failed to find text box: {e}")
+                        raise e
+
+                    time.sleep(2)
+
+                    # 3. Click Post
+                    self.log("Looking for final Post button...")
+                    try:
+                        final_post_btn = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//div[@aria-label='โพสต์' and @role='button']")))
+                        final_post_btn.click()
+                        self.log("Clicked Post button! Success.")
+                        success_count += 1
+                    except Exception as e:
+                        self.log(f"Failed to click final Post button: {e}")
+                        raise e
+                    
+                    # Wait a bit between posts if there are more
+                    if i < len(target_groups) - 1:
+                        self.log("Waiting 5 seconds before next group...")
+                        time.sleep(5)
+
+                except Exception as e:
+                    self.log(f"Skipping group {target_group} due to error: {e}")
             
-            # 1. Click "Write something..."
-            self.log("Looking for post button...")
-            try:
-                # Try multiple selectors for better robustness
-                post_btn = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//span[contains(text(), 'เขียนอะไรสักหน่อย')]")))
-                post_btn.click()
-                self.log("Clicked 'Write something...'")
-            except Exception as e:
-                self.log(f"Failed to find first post button: {e}")
-                self.log("Trying alternative method...")
-                # Could add fallback here if needed
-                raise e
-
-            time.sleep(2)
-
-            # 2. Type message
-            self.log("Waiting for text box...")
-            try:
-                # Based on original script logic
-                text_box = self.wait.until(EC.visibility_of_element_located((By.XPATH, "//div[@aria-placeholder='สร้างโพสต์สาธารณะ...']")))
-                text_box.click()
-                text_box.send_keys(message_content)
-                self.log("Message typed.")
-            except Exception as e:
-                self.log(f"Failed to find text box: {e}")
-                raise e
-
-            time.sleep(2)
-
-            # 3. Click Post
-            self.log("Looking for final Post button...")
-            try:
-                final_post_btn = self.wait.until(EC.element_to_be_clickable((By.XPATH, "//div[@aria-label='โพสต์' and @role='button']")))
-                final_post_btn.click()
-                self.log("Clicked Post button! Success.")
-                messagebox.showinfo("Success", "Post submited successfully!")
-            except Exception as e:
-                self.log(f"Failed to click final Post button: {e}")
-                raise e
+            messagebox.showinfo("Completed", f"Finished posting to {success_count}/{len(target_groups)} groups.")
 
         except Exception as e:
             self.log(f"Error during posting: {e}")
