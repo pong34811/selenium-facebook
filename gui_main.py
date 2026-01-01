@@ -18,6 +18,7 @@ class FacebookAutoGUI:
         
         self.driver = None
         self.wait = None
+        self.stop_event = threading.Event()  # Flag to control stopping
 
         # Styles
         style = ttk.Style()
@@ -51,6 +52,9 @@ class FacebookAutoGUI:
 
         self.btn_post = ttk.Button(btn_frame, text="2. Start Posting", command=self.start_posting, state=tk.DISABLED)
         self.btn_post.pack(side=tk.LEFT, padx=5)
+
+        self.btn_cancel = ttk.Button(btn_frame, text="Stop Posting", command=self.stop_posting, state=tk.DISABLED)
+        self.btn_cancel.pack(side=tk.LEFT, padx=5)
 
         # 4. Logs
         log_frame = ttk.LabelFrame(root, text="Logs", padding=10)
@@ -105,11 +109,17 @@ class FacebookAutoGUI:
             messagebox.showerror("Error", "Browser is not open!")
             return
         
+        self.stop_event.clear()
+        self.btn_cancel.config(state=tk.NORMAL)
+        self.btn_post.config(state=tk.DISABLED)  # Prevent double click
         threading.Thread(target=self._post_thread, daemon=True).start()
+
+    def stop_posting(self):
+        self.stop_event.set()
+        self.log("!!! Stop requested by user... finishes current group then stops. !!!")
 
     def _post_thread(self):
         try:
-            self.btn_post.config(state=tk.DISABLED)
             # Parse URLs from the text area
             raw_text = self.url_text.get("1.0", tk.END).strip()
             # Split by newlines and clean up each line (remove quotes, commas, whitespace)
@@ -131,6 +141,10 @@ class FacebookAutoGUI:
             success_count = 0
 
             for i, target_group in enumerate(target_groups):
+                if self.stop_event.is_set():
+                    self.log("--- Posting STOPPED by User ---")
+                    break
+
                 self.log(f"\n--- Processing Group {i+1}/{len(target_groups)} ---")
                 self.log(f"Target: {target_group}")
                 
@@ -139,6 +153,9 @@ class FacebookAutoGUI:
                     
                     # Random sleep to look more human
                     time.sleep(3) 
+
+                    # Check stop before critical actions
+                    if self.stop_event.is_set(): break
 
                     # 1. Click "Write something..."
                     self.log("Looking for post button...")
@@ -153,7 +170,8 @@ class FacebookAutoGUI:
                         self.log(f"Could not find standard post button: {e}")
                         raise e
 
-                    time.sleep(2)
+                    time.sleep(5)
+                    if self.stop_event.is_set(): break
 
                     # 2. Type message
                     self.log("Waiting for text box...")
@@ -167,7 +185,8 @@ class FacebookAutoGUI:
                         self.log(f"Failed to find text box: {e}")
                         raise e
 
-                    time.sleep(2)
+                    time.sleep(5)
+                    if self.stop_event.is_set(): break
 
                     # 3. Click Post
                     self.log("Looking for final Post button...")
@@ -188,13 +207,17 @@ class FacebookAutoGUI:
                 except Exception as e:
                     self.log(f"Skipping group {target_group} due to error: {e}")
             
-            messagebox.showinfo("Completed", f"Finished posting to {success_count}/{len(target_groups)} groups.")
+            if not self.stop_event.is_set():
+                messagebox.showinfo("Completed", f"Finished posting to {success_count}/{len(target_groups)} groups.")
+            else:
+                self.log(f"Stopped. Posted successfully to {success_count} groups.")
 
         except Exception as e:
             self.log(f"Error during posting: {e}")
             messagebox.showerror("Error", f"An error occurred: {e}")
         finally:
             self.root.after(0, lambda: self.btn_post.config(state=tk.NORMAL))
+            self.root.after(0, lambda: self.btn_cancel.config(state=tk.DISABLED))
 
 if __name__ == "__main__":
     root = tk.Tk()
